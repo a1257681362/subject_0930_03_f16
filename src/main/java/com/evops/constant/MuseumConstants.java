@@ -657,4 +657,53 @@ public final class MuseumConstants {
     public static final String ACTION_VAL_ACCESS_DENY = "VALUATION_ACCESS_DENY";
     public static final String ACTION_VAL_POLICY_TIGHTEN = "VAL_PERMIT_TIGHTEN";
     public static final String ACTION_VAL_POLICY_RELAX = "VAL_PERMIT_RELAX";
+
+    // --------------------------------------------------------------------
+    // museum-16 文物修复年度报表
+    // --------------------------------------------------------------------
+
+    /** 指标口径版本状态：草稿 / 当前生效 / 已被新版本取代（只追加不改写） */
+    public static final String CALIBER_DRAFT = "DRAFT";
+    public static final String CALIBER_ACTIVE = "ACTIVE";
+    public static final String CALIBER_SUPERSEDED = "SUPERSEDED";
+
+    /** 年度报表状态：已生成归档快照 / 已撤回（快照与凭证全部保留） */
+    public static final String ANNUAL_REPORT_GENERATED = "GENERATED";
+    public static final String ANNUAL_REPORT_REVOKED = "REVOKED";
+
+    /** 生成触发方式：手动 / Quartz 定时 */
+    public static final String TRIGGER_MANUAL = "MANUAL";
+    public static final String TRIGGER_SCHEDULED = "SCHEDULED";
+
+    /** 生成任务日志状态：进行中 / 成功 / 失败（日志保留不删） */
+    public static final String JOB_RUNNING = "RUNNING";
+    public static final String JOB_SUCCESS = "SUCCESS";
+    public static final String JOB_FAILED = "FAILED";
+
+    /** 失败告警状态：待处理 / 已确认 */
+    public static final String ANNUAL_ALERT_OPEN = "OPEN";
+    public static final String ANNUAL_ALERT_ACKED = "ACKNOWLEDGED";
+
+    /** 报表异常凭证类型：环境异常事件 / 修复设备故障 */
+    public static final String ANOMALY_ENV_EVENT = "ENV_EVENT";
+    public static final String ANOMALY_EQUIPMENT_FAULT = "EQUIPMENT_FAULT";
+
+    /**
+     * 导出人保密许可角色：REPORT_ADMIN 报表管理员（可导出全部密级明细）；
+     * REPORT_READER 普通报表查阅人（保密一级文物明细整列剔除，只见汇总与二/三级）。
+     */
+    public static final String ROLE_REPORT_ADMIN = "REPORT_ADMIN";
+    public static final String ROLE_REPORT_READER = "REPORT_READER";
+
+    /**
+     * 台账流水动作：口径版本发布 / 年度报表生成 / 撤回 / 撤回后重提
+     * / 异常凭证追加 / 生成任务失败告警 / 告警确认。
+     */
+    public static final String ACTION_ANNUAL_CALIBER_PUBLISH = "ANNUAL_CALIBER_PUBLISH";
+    public static final String ACTION_ANNUAL_REPORT_GENERATE = "ANNUAL_REPORT_GENERATE";
+    public static final String ACTION_ANNUAL_REPORT_REVOKE = "ANNUAL_REPORT_REVOKE";
+    public static final String ACTION_ANNUAL_REPORT_RESUBMIT = "ANNUAL_REPORT_RESUBMIT";
+    public static final String ACTION_ANNUAL_ANOMALY_APPEND = "ANNUAL_ANOMALY_APPEND";
+    public static final String ACTION_ANNUAL_JOB_FAILED = "ANNUAL_JOB_FAILED";
+    public static final String ACTION_ANNUAL_ALERT_ACK = "ANNUAL_ALERT_ACK";
 }

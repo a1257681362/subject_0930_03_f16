@@ -999,3 +999,80 @@ CONDITIONAL 必带合法等级、无借阅/已批准待出库 RECALL/已归还 S
 公众与普通馆员当前视图、版本履历、借展视图、快照列表全部拒绝且写 `VALUATION_ACCESS_DENY`；
 收紧后登记/提交/审批 HTTP 入口与绕过 URL 的服务层直调全部 `PermissionClosedException`
 拒绝且无写入、只读不受影响、两开关相互独立，放开后审批链继续生效出批单。
+
+## 文物修复年度报表（museum-16）
+
+修复工作年度归档报表：统计**立项数、完成数、材料消耗、借展次数、异常事件**五项指标，
+口径按版本保存，归档即不可变快照；支持撤回重提、缺验收资料标待补、Quartz 失败告警留日志、
+按馆区与保密级别裁剪导出。
+
+### 数据模型
+
+| 表 | 说明 |
+| --- | --- |
+| `t_annual_caliber_version` | 指标口径版本（全库 `version_no` 递增）：五项指标的归属时间字段、计入状态、是否扣退料、异常类型等固化为 `caliber_json`；`DRAFT / ACTIVE / SUPERSEDED`，发布新版本旧版本置 SUPERSEDED 只追加 |
+| `t_annual_report` | 年度报表归档快照头：`report_no`（`YR-<年度>-<全局6位序号>`）、`report_year/batch_no`（同年度同口径版本内批次递增）、五项指标合计、待补数、口径版本绑定、`GENERATED / REVOKED`、撤回链 `revoked_of_id`，生成后不可变 |
+| `t_annual_report_project_line` | 项目明细快照行：固化编号/名称/馆区/保密级/状态/委托人及 `counted_project/counted_completed/accepted/has_accept_docs/pending_supplement` 标志，逐行标明是否计入立项/完成及待补 |
+| `t_annual_report_loan_line` | 借展明细快照行：一次借展协议版本签署一行（协议变更重签各计一次），按签署时间归属年度 |
+| `t_annual_report_material_line` | 材料消耗快照行：一领用单一行，`issued/returned/net`（净消耗=实际领用−累计退料） |
+| `t_annual_report_anomaly` | 异常凭证（**只追加**）：环境异常（经展厅在展文物归属馆区/密级）+ 修复设备故障（经工时→项目→文物反查馆区/密级）；同一异常多次追加 `voucher_seq` 递增，永不覆盖 |
+| `t_annual_report_job_log` | Quartz/手动生成任务日志：每次触发一条 `RUNNING → SUCCESS/FAILED`，保留 `fire_key/error_message/起止时间`，失败不删不改 |
+| `t_annual_report_alert` | 生成失败告警：失败时追加 `OPEN`，人工确认置 `ACKNOWLEDGED`（只追加，不改写失败日志） |
+| `t_annual_report_ledger` | 年度报表台账（只追加）：口径发布/生成/撤回/重提/异常凭证追加/任务失败/告警确认全部留痕 |
+
+### 口径与统计规则
+
+- **五项指标按口径版本统计**（默认口径 V1）：
+  - 立项数：项目创建时间落在年度内且状态命中口径（默认 PLANNED/REPAIRING/REPAIRED/ACCEPTED）；
+  - 完成数：`finish_date` 落在年度内且状态命中（默认 REPAIRED/ACCEPTED，允许与立项跨年分别计入）；
+  - 材料消耗：按领用时间归属，明细行实际用量求和后扣减累计退料；
+  - 借展次数：借展协议版本 `SIGNED` 次数（按 `signed_at`，变更重签各算一次）；
+  - 异常事件：环境异常（`first_at`/`last_at` 可选）+ 修复设备故障（`fault_at`），类型可在口径中配置。
+- **口径白名单**：归属时间字段只能取声明值（CREATE_TIME/FINISH_DATE、USAGE_AT、SIGNED_AT、
+  FIRST_AT/LAST_AT、FAULT_AT），非法字段直接拒绝，杜绝列名注入。
+- **缺验收资料标待补**：已完成（命中完成口径）但无 museum-14 `PASSED` 成果报告的项目，
+  明细行 `pending_supplement=1` 并计入头表 `pending_supplement_count`；不影响其他指标。
+- **口径变更不改旧报表**：报表一旦生成即固化绑定口径版本 id；之后发布新口径，已归档报表的
+  再核对仍按原版本（快照数字不变），新口径另出新批次。
+- **撤回再重提**：撤回只置 `REVOKED`（快照/明细/凭证全保留、可查）；重提另出新批次、
+  新报表编号、新生成时间，默认沿用原口径版本（可指定新版本），`revoked_of_id` 串联撤回链——
+  编号、统计口径版本、时间三者都可辨。
+- **异常只追加凭证**：仅允许给本报表快照已覆盖的异常来源追加凭证（范围外拒绝），序号递增，
+  已撤回报表不能再追加；永不更新/覆盖/删除已有凭证。
+- **Quartz 失败告警与任务日志**：每次生成（定时或手动）先在独立事务落 RUNNING 日志；
+  成功置 SUCCESS，失败在独立事务置 FAILED 并追加 OPEN 告警与台账（不随业务事务回滚、不删日志），
+  异常继续抛出。Quartz Job `@DisallowConcurrentExecution` + 服务 `ReentrantLock` 双保险串行。
+- **导出裁剪**：CSV 必须声明 `viewerCampus`——先按馆区整行剔除（非本馆区不出库），再按
+  `role` 裁剪字段：`REPORT_ADMIN` 见全部密级；`REPORT_READER`（默认）对保密一级（ONE）文物的
+  编号/名称/委托人/借展方/异常凭证内容打码，统计事实（计入标志、数量、净消耗）保留。
+
+### 年度报表接口
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `POST /api/annual-calibers` | 发布口径新版本（旧版本置 SUPERSEDED；spec 为空用默认口径，字段走白名单校验） |
+| `GET /api/annual-calibers[`/active`]` | 口径版本履历 / 当前生效版本 |
+| `POST /api/annual-reports/generate` | 手动生成归档快照（同样落任务日志，失败出 FAILED 日志+OPEN 告警） |
+| `POST /api/annual-reports/scheduled-fire?year=&campusScope=&generatedBy=` | 模拟 Quartz 定时触发（triggeredBy=SCHEDULED，测试/运维用） |
+| `GET /api/annual-reports[?year=]` | 报表列表（含已撤回批次） |
+| `GET /api/annual-reports/{id}` | 报表详情：头 + 口径版本/规格 + 项目/借展/材料明细 + 异常凭证 + 待补项目 |
+| `POST /api/annual-reports/{id}/revoke` | 撤回归档报表（快照保留，只置 REVOKED） |
+| `POST /api/annual-reports/{id}/resubmit` | 撤回后重提：新批次/新编号/新时间，撤回链可辨 |
+| `POST /api/annual-reports/{id}/anomalies` | 追加异常凭证（只追加，不覆盖已有凭证） |
+| `GET /api/annual-reports/{id}/export?viewerCampus=&role=` | CSV 导出：按馆区整行裁剪 + 按保密级别打码 |
+| `GET /api/annual-report-alerts[?status=]` / `POST /api/annual-report-alerts/{id}/ack` | 失败告警列表 / 确认告警 |
+| `GET /api/annual-report-job-logs[?year=]` | 生成任务日志（RUNNING/SUCCESS/FAILED 全保留） |
+
+配置：`museum.annual-report.cron`（默认空=不注册 Quartz 触发器，仍可手动生成；
+如每年 1 月 5 日 02:00 生成上一年度报表填 `0 0 2 5 1 ?`）。
+
+### 测试
+
+`AnnualReportTest`（独立内存库）覆盖：五项指标按 V1 口径统计、材料净消耗扣退料、
+缺 PASSED 成果报告项目标待补、年度边界（上年最后一秒/下年零点）归属；先生成报表后发布
+V2 收紧口径（完成数仅 ACCEPTED），旧报表仍按 V1 核对且数字不变、新口径另出新批次；
+Quartz 模拟触发 2024 报 SCHEDULED 日志；错误口径版本生成失败保留 FAILED 日志并出 OPEN 告警、
+确认后日志不改写；撤回后重提编号（YR 序号递增）、批次、口径版本、生成时间与撤回链全部可辨、
+旧批 REVOKED 保留；异常凭证两次追加序号 1/2 首份不被覆盖、范围外异常与已撤回报表拒绝追加；
+CSV 对 MAIN/EAST 馆区整行裁剪、REPORT_READER 对一级文物打码而 REPORT_ADMIN 见明文、
+未声明馆区拒绝导出。
