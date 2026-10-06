@@ -97,6 +97,13 @@ museum:
       - material: "书画"
         craft: "*"
         items: 画心平整无新增折痕,补纸色差在允许范围,影像档案完整（修复前后对照）
+  # 文物修复年度报表（museum-16）：Quartz 每年定时生成上一完整自然年度报表
+  annual-report:
+    # 是否向 Quartz 注册年度触发器；关闭后仍可手动触发同一任务
+    quartz-enabled: true
+    # Quartz cron：默认每年 1 月 2 日 02:00:00 生成上一年度报表
+    generate-cron: "0 0 2 2 1 ?"
+    job-group: MUSEUM_ANNUAL_REPORT
 
 mybatis-plus:
   mapper-locations: classpath*:mapper/**/*.xml

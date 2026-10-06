@@ -657,4 +657,39 @@ public final class MuseumConstants {
     public static final String ACTION_VAL_ACCESS_DENY = "VALUATION_ACCESS_DENY";
     public static final String ACTION_VAL_POLICY_TIGHTEN = "VAL_PERMIT_TIGHTEN";
     public static final String ACTION_VAL_POLICY_RELAX = "VAL_PERMIT_RELAX";
+
+    // --------------------------------------------------------------------
+    // museum-16 文物修复年度报表
+    // --------------------------------------------------------------------
+
+    /** 指标口径版本状态：DRAFT 草稿 / ACTIVE 当前生效 / SUPERSEDED 已被新版本取代 */
+    public static final String METRIC_DRAFT = "DRAFT";
+    public static final String METRIC_ACTIVE = "ACTIVE";
+    public static final String METRIC_SUPERSEDED = "SUPERSEDED";
+
+    /** 年度报表状态：GENERATED 已生成待归档 / ARCHIVED 已归档冻结 / WITHDRAWN 已撤回 */
+    public static final String REPORT_GENERATED = "GENERATED";
+    public static final String REPORT_ARCHIVED = "ARCHIVED";
+    public static final String REPORT_WITHDRAWN = "WITHDRAWN";
+
+    /** 报表快照类型：GENERATED 首版 / RESUBMIT 撤回重提 / ARCHIVED 归档 / RECHECK 归档后核对 */
+    public static final String SNAPSHOT_GENERATED = "GENERATED";
+    public static final String SNAPSHOT_RESUBMIT = "RESUBMIT";
+    public static final String SNAPSHOT_ARCHIVED = "ARCHIVED";
+    public static final String SNAPSHOT_RECHECK = "RECHECK";
+
+    /** 异常事件来源 */
+    public static final String ANOMALY_EQUIPMENT_FAULT = "EQUIPMENT_FAULT";
+    public static final String ANOMALY_ESCORT = "ESCORT_ANOMALY";
+
+    /** Quartz/手动任务触发类型与结果 */
+    public static final String JOB_TRIGGER_SCHEDULED = "SCHEDULED";
+    public static final String JOB_TRIGGER_MANUAL = "MANUAL";
+    public static final String JOB_SUCCESS = "SUCCESS";
+    public static final String JOB_FAILED = "FAILED";
+
+    /** 生成失败告警类型与状态 */
+    public static final String ALERT_GENERATE_FAILED = "GENERATE_FAILED";
+    public static final String ALERT_OPEN = "OPEN";
+    public static final String ALERT_ACKED = "ACKNOWLEDGED";
 }

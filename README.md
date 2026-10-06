@@ -999,3 +999,75 @@ CONDITIONAL 必带合法等级、无借阅/已批准待出库 RECALL/已归还 S
 公众与普通馆员当前视图、版本履历、借展视图、快照列表全部拒绝且写 `VALUATION_ACCESS_DENY`；
 收紧后登记/提交/审批 HTTP 入口与绕过 URL 的服务层直调全部 `PermissionClosedException`
 拒绝且无写入、只读不受影响、两开关相互独立，放开后审批链继续生效出批单。
+
+## 文物修复年度报表（museum-16）
+
+按自然年度生成文物修复年度报表，统计**立项数、完成数、材料消耗、借展次数、异常事件**
+五项指标，并把**缺少验收资料**的完成项目标为`待补`。**指标口径按版本保存**，报表生成时
+固化所用口径版本；报表可**撤回后重新提交**，归档后只能**追加新快照**；Quartz 定时生成，
+**失败告警并保留任务日志**；导出文件**按馆区与保密级别裁剪字段**。
+
+### 数据模型
+
+| 表 | 说明 |
+| --- | --- |
+| `t_annual_metric_version` | 指标口径版本（全库 `version_no` 递增）：立项/完成/材料/借展/异常/验收六项口径随版本固化；`DRAFT / ACTIVE / SUPERSEDED`，发布新版旧版置 SUPERSEDED 且字段永不改写 |
+| `t_annual_report` | 年度报表主单（编号 `ARR-{year}-%04d`）：固化口径版本 id+版本号+单号；`GENERATED / ARCHIVED / WITHDRAWN`；稀疏唯一键 `active_key='Y'+year` 保证同年同时只一份在途；`supersedes_report_id` 指向撤回重提的原报表 |
+| `t_annual_report_snapshot` | 报表快照，只追加不可变：报表内 `seq_no` 递增，`GENERATED / RESUBMIT / ARCHIVED / RECHECK`；完整项目级统计（含馆区/密级分组与待补清单）存 `stats_json` |
+| `t_annual_report_anomaly_evidence` | 异常凭证，只追加：`uk(report_id,source,source_no)` 幂等；`EQUIPMENT_FAULT` 修复设备故障 / `ESCORT_ANOMALY` 押运节点异常；归档后核对只 INSERT 新凭证，不覆盖旧凭证 |
+| `t_annual_report_job_log` | Quartz/手动生成任务日志：每次触发行，`SCHEDULED / MANUAL` × `SUCCESS / FAILED`，失败保留错误堆栈（`report_year` 可空，年份无法解析的失败也留痕） |
+| `t_annual_report_alert` | 生成失败告警：一条失败日志一条（`uk(job_log_id)`），`OPEN / ACKNOWLEDGED`，人工确认关闭，只提示不改业务状态 |
+
+### 口径与生命周期规则
+
+- **五项指标取数**：立项按项目创建时间落年；完成按 `finish_date` 落年且状态在口径内
+  （默认 `REPAIRED,ACCEPTED`）；材料消耗＝年内实际领用（明细 `actual_qty`）− 年内退料；
+  借展次数＝年内借展协议**签署版本**数（每次签署计一次，变更重签另计）；异常事件＝
+  设备故障（经工时明细行归属项目/馆区）＋押运异常节点，来源集合随口径版本配置。
+- **缺验收资料标待补**：完成项目无 `PASSED` 成果报告（museum-14）即在项目行标 `PENDING`，
+  并累计 `pending_accept_count`。
+- **口径按版本保存、报表先变更仍按原版本核对**：报表冗余固化口径版本号与各口径；
+  之后发布新口径版本，在途/已归档报表的核对（含归档后 RECHECK）始终取报表原 `metric_version_id`。
+- **撤回重提三者可辨**：仅 `GENERATED` 可撤回（置 `WITHDRAWN`、释放在途唯一键，快照与凭证保留）；
+  重提**另取新报表编号**、记录当时生效口径版本号、独立 `generated_at`，并以 `supersedes_report_id`
+  指向被撤回报表。同批数据撤回再重提，编号/口径版本/时间各自可辨、可追溯。
+- **归档冻结只能新快照**：`ARCHIVED` 为终态，出 ARCHIVED 快照冻结数字，不可再归档/撤回；
+  归档后重新核对**只追加 RECHECK 快照**与新增异常凭证，原归档快照与既有凭证永不改写
+  （凭证命中唯一键即跳过，绝不 UPDATE/DELETE）。
+- **Quartz 失败告警与任务日志**：Quartz `CronTrigger` 默认每年 1 月 2 日 02:00 生成上一完整
+  自然年度报表（`museum.annual-report.generate-cron`，可 `quartz-enabled=false` 关闭注册）。
+  每次触发（含手动）都落任务日志；生成失败业务事务回滚，但失败日志与一条 OPEN 告警独立保留，
+  失败绝不伪装成功；告警人工 ACKNOWLEDGED 关闭。
+- **导出按馆区与保密级别裁剪**：`viewerCampus` 限定馆区行集，`clearanceGrade`
+  （ONE 最敏感/TWO/THREE 最低）限定可见密级行；字段逐级放开——THREE 仅基础列（无保密级别、
+  无委托人），TWO 增加保密级别，ONE 再增委托人。CSV（带 BOM）与 export-view JSON 同一行集同一列口径。
+
+### 年度报表接口
+
+| 方法与路径 | 作用 |
+| --- | --- |
+| `POST /api/annual-reports/metric-versions` | 登记口径版本（`publish=true` 直接发布，旧版置 SUPERSEDED） |
+| `POST /api/annual-reports/metric-versions/{id}/publish` | 发布口径版本生效 |
+| `GET /api/annual-reports/metric-versions` | 口径版本履历 |
+| `POST /api/annual-reports/generate` | 按年份+当前生效口径手动生成（记 MANUAL 任务日志；失败出告警；在途幂等） |
+| `POST /api/annual-reports/trigger-quartz` | 立即触发一次 Quartz 年度任务（结果见任务日志/告警） |
+| `POST /api/annual-reports/{id}/withdraw` | 撤回未归档报表（释放年份，可重提） |
+| `POST /api/annual-reports/{id}/archive` | 归档冻结（终态，出 ARCHIVED 快照） |
+| `POST /api/annual-reports/{id}/recheck` | 归档后按**原口径版本**核对，只追加 RECHECK 快照与新凭证 |
+| `GET /api/annual-reports[?year=]` / `GET /api/annual-reports/{id}` | 年度报表列表 / 详情（快照序列+凭证） |
+| `GET /api/annual-reports/{id}/snapshots` | 报表全部快照（含历史口径数字） |
+| `GET /api/annual-reports/{id}/export-view` | 裁剪后的导出视图（`viewerCampus`、`clearanceGrade`） |
+| `GET /api/annual-reports/{id}/export` | CSV 导出（与 export-view 同行集同列，带 BOM） |
+| `GET /api/annual-reports/job-logs[?year=]` | 生成任务日志（成败全保留） |
+| `GET /api/annual-reports/alerts[?status=]` / `POST /api/annual-reports/alerts/{id}/ack` | 失败告警列表 / 人工确认 |
+
+### 测试
+
+`AnnualReportTest`（独立内存库，Quartz 真实触发）覆盖：五项指标统计（立项/完成/材料净消耗/
+借展签署次数/设备故障+押运异常）与待补验收标识；在途重复生成幂等；未归档撤回后重提
+**新编号+新生效口径版本+独立时间+指向原报表**，旧报表与快照保留；口径先发布 V2 后，
+已归档报表核对仍按原 V1（异常数不随新口径改变）；归档终态不可再归档/撤回；归档后只追加
+RECHECK 快照、归档数字冻结、异常凭证三轮固化不翻倍不覆盖；导出按馆区与 ONE/TWO/THREE
+密级裁剪行与列（CSV 与 JSON 行集一致）；Quartz 触发落 SCHEDULED 日志；生成失败落 FAILED
+日志（含堆栈）+ OPEN 告警且不伪装成功、不影响既有报表，告警人工确认且不可重复确认，
+成功与失败任务日志均保留。
